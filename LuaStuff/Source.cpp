@@ -13,6 +13,11 @@ struct ValueConverter<int>
     {
         lua_pushinteger(L, v);
     }
+
+    static int Unpack(lua_State* L, int idx)
+    {
+        return lua_tointeger(L, idx);
+    }
 };
 
 template <typename T>
@@ -21,9 +26,10 @@ struct FunctionWrapper;
 template <typename Ret, typename ...Args >
 struct FunctionWrapper<Ret (*)(Args...)>
 {
-    static std::tuple<Args...> get_arguments_from_lua(lua_State* L)
+    template<std::size_t ...I>
+    static std::tuple<Args...> get_arguments_from_lua(lua_State* L, std::index_sequence<I...>)
     {
-        return std::tuple<Args...>();
+        return std::make_tuple(ValueConverter<Args>::Unpack(L, I + 1)...);
     }
 
     template<std::size_t ...I>
@@ -40,7 +46,7 @@ struct FunctionWrapper<Ret (*)(Args...)>
         ValueConverter<Ret>::PushValue(L,
             call_func(
                 f,
-                get_arguments_from_lua(L),
+                get_arguments_from_lua(L, std::index_sequence_for<Args...>{}),
                 std::index_sequence_for<Args...>{}));
 
         return 1;
@@ -64,8 +70,32 @@ int double_arg(int x) {
     return x * 2;
 }
 
+struct Foo
+{
+    Foo(int x) : bah(5 * x) {}
+    int bah;
+};
+
+template<typename T>
+T stuff(int i)
+{
+    return T(i);
+}
+
+template <typename ...Args>
+struct Bah
+{
+    template<std::size_t ...I>
+    static void f(std::index_sequence<I...>)
+    {
+        auto lol = std::make_tuple(stuff<Args>(I+1)...);
+    }
+};
+
 int main()
 {
+    Bah<int, Foo>::f(std::make_index_sequence<2>());
+
     lua_State* L = lua_open();
     lua_gc(L, LUA_GCSTOP, 0);  /* stop collector during initialization */
     luaL_openlibs(L);  /* open libraries */
