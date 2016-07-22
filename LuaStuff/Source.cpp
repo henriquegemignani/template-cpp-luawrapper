@@ -27,29 +27,19 @@ template <typename Ret, typename ...Args >
 struct FunctionWrapper<Ret (*)(Args...)>
 {
     template<std::size_t ...I>
-    static std::tuple<Args...> get_arguments_from_lua(lua_State* L, std::index_sequence<I...>)
+    static int call_func(lua_State* L, std::index_sequence<I...>)
     {
-        return std::make_tuple(ValueConverter<Args>::Unpack(L, I + 1)...);
-    }
+        Ret(*func)(Args...) = static_cast<Ret(*)(Args...)>(lua_touserdata(L, lua_upvalueindex(1)));
 
-    template<std::size_t ...I>
-    static Ret call_func(Ret(*func)(Args...), std::tuple<Args...>&& params, std::index_sequence<I...>)
-    {
-        return func(std::get<I>(params)...);
+        ValueConverter<Ret>::PushValue(L,
+            func(ValueConverter<Args>::Unpack(L, I + 1)...));
+
+        return 1;
     }
 
     static int lua_cfunc(lua_State* L)
     {
-        void* f_void = lua_touserdata(L, lua_upvalueindex(1));
-        Ret(*f)(Args...) = static_cast<Ret(*)(Args...)>(f_void);
-
-        ValueConverter<Ret>::PushValue(L,
-            call_func(
-                f,
-                get_arguments_from_lua(L, std::index_sequence_for<Args...>{}),
-                std::index_sequence_for<Args...>{}));
-
-        return 1;
+        return call_func(L, std::index_sequence_for<Args...>{});
     }
 
     static void PushFunction(lua_State* L, Ret(*f)(Args...))
@@ -58,7 +48,6 @@ struct FunctionWrapper<Ret (*)(Args...)>
         lua_pushcclosure(L, lua_cfunc, 1);
     }
 };
-
 
 template <typename T>
 void push_function_wrapper(lua_State* L, T func)
@@ -70,32 +59,8 @@ int double_arg(int x) {
     return x * 2;
 }
 
-struct Foo
-{
-    Foo(int x) : bah(5 * x) {}
-    int bah;
-};
-
-template<typename T>
-T stuff(int i)
-{
-    return T(i);
-}
-
-template <typename ...Args>
-struct Bah
-{
-    template<std::size_t ...I>
-    static void f(std::index_sequence<I...>)
-    {
-        auto lol = std::make_tuple(stuff<Args>(I+1)...);
-    }
-};
-
 int main()
 {
-    Bah<int, Foo>::f(std::make_index_sequence<2>());
-
     lua_State* L = lua_open();
     lua_gc(L, LUA_GCSTOP, 0);  /* stop collector during initialization */
     luaL_openlibs(L);  /* open libraries */
