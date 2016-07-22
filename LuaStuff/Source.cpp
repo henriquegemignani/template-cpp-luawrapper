@@ -1,10 +1,67 @@
 #include <cstdio>
 #include "lua.hpp"
+#include <tuple>
 
-int mah_function(lua_State* L)
+
+template <typename T>
+struct ValueConverter;
+
+template <>
+struct ValueConverter<int>
 {
-    lua_pushinteger(L, 5);
-    return 1;
+    static void PushValue(lua_State* L, int v)
+    {
+        lua_pushinteger(L, v);
+    }
+};
+
+template <typename T>
+struct FunctionWrapper;
+
+template <typename Ret, typename ...Args >
+struct FunctionWrapper<Ret (*)(Args...)>
+{
+    static std::tuple<Args...> get_arguments_from_lua(lua_State* L)
+    {
+        return std::tuple<Args...>();
+    }
+
+    template<std::size_t ...I>
+    static Ret call_func(Ret(*func)(Args...), std::tuple<Args...>&& params, std::index_sequence<I...>)
+    {
+        return func(std::get<I>(params)...);
+    }
+
+    static int lua_cfunc(lua_State* L)
+    {
+        void* f_void = lua_touserdata(L, lua_upvalueindex(1));
+        Ret(*f)(Args...) = static_cast<Ret(*)(Args...)>(f_void);
+
+        ValueConverter<Ret>::PushValue(L,
+            call_func(
+                f,
+                get_arguments_from_lua(L),
+                std::index_sequence_for<Args...>{}));
+
+        return 1;
+    }
+
+    static void PushFunction(lua_State* L, Ret(*f)(Args...))
+    {
+        lua_pushlightuserdata(L, f);
+        lua_pushcclosure(L, lua_cfunc, 1);
+    }
+};
+
+
+template <typename T>
+void push_function_wrapper(lua_State* L, T func)
+{
+    FunctionWrapper<T>::PushFunction(L, func);
+}
+
+int double_arg(int x) {
+    return x * 2;
 }
 
 int main()
@@ -14,7 +71,7 @@ int main()
     luaL_openlibs(L);  /* open libraries */
     lua_gc(L, LUA_GCRESTART, 0);
 
-    lua_pushcfunction(L, mah_function);
+    push_function_wrapper(L, double_arg);
     lua_setglobal(L, "mah_function");
 
     luaL_loadfile(L, "main.lua");
